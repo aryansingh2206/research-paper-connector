@@ -1,0 +1,84 @@
+services:
+  # --------------------------------------------------
+  # Endee Vector Database (OSS)
+  # --------------------------------------------------
+  endee:
+    image: endeeio/endee-server:latest
+    container_name: endee-server
+    ports:
+      - "3000:8080"
+    environment:
+      NDD_DATA_DIR: /data
+      NDD_NUM_THREADS: "0"
+    volumes:
+      - endee_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - research-paper-network
+
+  # --------------------------------------------------
+  # Application (Streamlit + Ingestion)
+  # --------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: research-paper-app
+    ports:
+      - "8501:8501"
+
+    environment:
+      # ---- Endee ----
+      ENDEE_HOST: endee
+      ENDEE_PORT: "8080"
+      ENDEE_COLLECTION: research_papers
+
+      # ---- Embeddings ----
+      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+
+      # 🔒 OFFLINE MODE (ABSOLUTELY REQUIRED)
+      HF_HOME: /root/.cache/huggingface
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+
+      # ---- Optional LLMs ----
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      USE_LLM_SUMMARIZATION: ${USE_LLM_SUMMARIZATION:-false}
+
+    volumes:
+      # App code & data
+      - ./data:/app/data
+      - ./src:/app/src
+      - ./app:/app/app
+
+      # 🔥 HuggingFace cache (Windows-safe absolute path)
+      - /c/Users/aryan/.cache/huggingface:/root/.cache/huggingface
+
+    depends_on:
+      endee:
+        condition: service_healthy
+
+    command: streamlit run app/streamlit_app.py --server.address 0.0.0.0
+    restart: unless-stopped
+    networks:
+      - research-paper-network
+
+# --------------------------------------------------
+# Volumes
+# --------------------------------------------------
+volumes:
+  endee_data:
+    driver: local
+
+# --------------------------------------------------
+# Network
+# --------------------------------------------------
+networks:
+  research-paper-network:
+    driver: bridge
